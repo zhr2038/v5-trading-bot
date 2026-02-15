@@ -98,3 +98,38 @@ def test_deadband_allows_large_drift():
     assert len(out.orders) == 1
     assert out.orders[0].symbol == "SOL/USDT"
     assert audit.rebalance_skipped_deadband_count == 0
+
+
+def test_removed_symbol_sell_not_blocked_by_low_cash():
+    cfg = AppConfig()
+    cfg.rebalance.deadband_sideways = 0.0
+
+    pipe = V5Pipeline(cfg)
+    md = {"SOL/USDT": _series("SOL/USDT", 100.0), "BTC/USDT": _series("BTC/USDT", 100.0)}
+
+    # 持有 SOL，但目标仓位为空（应触发卖出）。
+    positions = [
+        Position(
+            symbol="SOL/USDT",
+            qty=1.0,
+            avg_px=100.0,
+            entry_ts="t",
+            highest_px=100.0,
+            last_update_ts="t",
+            last_mark_px=100.0,
+            unrealized_pnl_pct=0.0,
+        )
+    ]
+    audit = DecisionAudit(run_id="t")
+
+    pipe.exit_policy.evaluate = lambda **kwargs: []
+    pipe.portfolio_engine.allocate = lambda scores, market_data, regime_mult, audit=None: SimpleNamespace(
+        target_weights={}, selected=[], volatilities={}, notes=""
+    )
+
+    # 现金为 0，不应阻止卖单生成。
+    out = pipe.run(market_data_1h=md, positions=positions, cash_usdt=0.0, equity_peak_usdt=100.0, audit=audit)
+
+    assert len(out.orders) == 1
+    assert out.orders[0].symbol == "SOL/USDT"
+    assert out.orders[0].side == "sell"
