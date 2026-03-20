@@ -13,6 +13,10 @@ from src.core.models import MarketSeries
 from src.utils.math import clamp
 
 
+def _coalesce(value: Any, default: Any) -> Any:
+    return default if value is None else value
+
+
 @dataclass
 class PortfolioSnapshot:
     """投资组合快照"""
@@ -470,7 +474,7 @@ class PortfolioEngine:
             try:
                 state = self._load_optimizer_state()
                 prev_w = state.get('weights') or {}
-                lam = float(getattr(self.alpha_cfg, 'optimizer_prev_weight_penalty', 0.35) or 0.35)
+                lam = float(_coalesce(getattr(self.alpha_cfg, 'optimizer_prev_weight_penalty', 0.35), 0.35))
                 lam = clamp(lam, 0.0, 1.0)
                 floor = float(getattr(self.alpha_cfg, 'optimizer_min_weight_floor', 0.0) or 0.0)
                 floor = clamp(floor, 0.0, 0.2)

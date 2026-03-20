@@ -26,6 +26,8 @@ def _series(sym: str, close: float) -> MarketSeries:
 def test_deadband_skips_small_drift():
     cfg = AppConfig()
     cfg.rebalance.deadband_sideways = 0.05
+    cfg.budget.min_trade_notional_base = 0.0
+    cfg.budget.exchange_min_notional_enabled = False
 
     pipe = V5Pipeline(cfg)
 
@@ -65,6 +67,8 @@ def test_deadband_skips_small_drift():
 def test_deadband_allows_large_drift():
     cfg = AppConfig()
     cfg.rebalance.deadband_sideways = 0.05
+    cfg.budget.min_trade_notional_base = 0.0
+    cfg.budget.exchange_min_notional_enabled = False
 
     pipe = V5Pipeline(cfg)
 

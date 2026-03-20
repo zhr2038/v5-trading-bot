@@ -119,3 +119,45 @@ def test_portfolio_fused_selection_respects_lower_alpha_adjusted_score(tmp_path:
         os.chdir(cwd)
 
     assert snap.selected == ["HYPE/USDT"]
+
+
+def test_portfolio_optimizer_respects_zero_prev_weight_penalty(tmp_path: Path):
+    alpha_cfg = AlphaConfig(long_top_pct=1.0, optimizer_enabled=True, optimizer_prev_weight_penalty=0.0)
+    alpha_cfg.optimizer_state_path = str(tmp_path / "optimizer_state.json")
+    pe = PortfolioEngine(alpha_cfg=alpha_cfg, risk_cfg=RiskConfig(max_single_weight=1.0))
+
+    state_path = Path(alpha_cfg.optimizer_state_path)
+    state_path.write_text(
+        json.dumps(
+            {
+                "weights": {
+                    "A/USDT": 0.0,
+                    "B/USDT": 1.0,
+                },
+                "updated_ts": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    md = {}
+    for sym in ("A/USDT", "B/USDT"):
+        md[sym] = MarketSeries(
+            symbol=sym,
+            timeframe="1h",
+            ts=list(range(200)),
+            open=[1.0] * 200,
+            high=[1.0] * 200,
+            low=[1.0] * 200,
+            close=[1.0 + i * 0.0001 for i in range(200)],
+            volume=[1000.0] * 200,
+        )
+
+    snap = pe.allocate(
+        scores={"A/USDT": 10.0, "B/USDT": 1.0},
+        market_data=md,
+        regime_mult=1.0,
+    )
+
+    assert snap.target_weights["A/USDT"] > 0.99
+    assert snap.target_weights["B/USDT"] < 0.01

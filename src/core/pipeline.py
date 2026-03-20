@@ -12,6 +12,10 @@ from pathlib import Path
 REPORTS_DIR = Path(__file__).parent.parent.parent / 'reports'
 
 
+def _coalesce(value: Any, default: Any) -> Any:
+    return default if value is None else value
+
+
 def _effective_deadband(base: float, cfg: AppConfig, audit: Optional[DecisionAudit]) -> float:
     """F3.1: widen deadband when daily budget exceeded (monitor-driven, controlled).
 
@@ -426,9 +430,11 @@ class V5Pipeline:
             return alpha
 
         min_cycles = int(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_min_closed_cycles', 2) or 2)
-        floor_bps = float(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_floor_bps', 5.0) or 5.0)
-        penalty_per_bps = float(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_per_bps', 0.015) or 0.015)
-        penalty_cap = float(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_max', 0.60) or 0.60)
+        floor_bps = float(_coalesce(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_floor_bps', 5.0), 5.0))
+        penalty_per_bps = float(
+            _coalesce(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_per_bps', 0.015), 0.015)
+        )
+        penalty_cap = float(_coalesce(getattr(self.cfg.execution, 'negative_expectancy_score_penalty_max', 0.60), 0.60))
 
         adjusted_scores = dict(alpha.scores or {})
         penalized = []
@@ -518,7 +524,7 @@ class V5Pipeline:
                         getattr(self.cfg.execution, "negative_expectancy_open_block_min_closed_cycles", 2) or 2
                     )
                     floor_bps = float(
-                        getattr(self.cfg.execution, "negative_expectancy_open_block_floor_bps", 5.0) or 5.0
+                        _coalesce(getattr(self.cfg.execution, "negative_expectancy_open_block_floor_bps", 5.0), 5.0)
                     )
                     closed_cycles = int((stat or {}).get("closed_cycles") or 0)
                     expectancy_bps = float((stat or {}).get("expectancy_bps") or 0.0)
@@ -1839,17 +1845,22 @@ class V5Pipeline:
             if audit:
                 audit.add_note(f"require_fused_signals_for_buy enabled: fused_buy_symbols={len(fused_buy_symbols)}")
 
-        # 预收集所有买入候选，用于比例现金分配
-        buy_candidates = []
+        # 预估本轮总买入/卖出缺口，用于在现金不足时按目标缺口缩放买单。
+        total_buy_gap_notional = 0.0
+        estimated_sell_notional = 0.0
         for sym in symbols_all:
+            if sym in exit_symbols:
+                continue
             tw = float(target.get(sym, 0.0))
             cw = float(current_w.get(sym, 0.0))
             drift = float(tw) - cw
+            gap_notional = abs(float(drift)) * float(equity)
             if drift > 0:
-                buy_candidates.append((sym, drift, tw))
-        
-        # 计算总买入权重，用于比例分配
-        total_buy_drift = sum(d for _, d, _ in buy_candidates) if buy_candidates else 0.0
+                total_buy_gap_notional += gap_notional
+            elif drift < 0:
+                estimated_sell_notional += gap_notional
+
+        buy_sizing_budget = max(0.0, float(cash_usdt)) + max(0.0, float(estimated_sell_notional))
 
         for sym in symbols_all:
             tw = float(target.get(sym, 0.0))
@@ -1974,14 +1985,12 @@ class V5Pipeline:
                 # drift > 0，需要加仓
                 side = "buy"
                 intent = "OPEN_LONG" if held is None else "REBALANCE"
-                # FIX: 按比例分配现金，而不是使用 drift * equity
-                # 这样可以避免第一个标的全额买入导致后续标的无法建仓
-                if total_buy_drift > 0 and cash_usdt > 0:
-                    # 按 drift 比例分配可用现金
-                    drift_ratio = abs(float(drift)) / total_buy_drift
-                    notional = drift_ratio * float(cash_usdt)
+                desired_notional = abs(float(drift)) * float(equity)
+                if total_buy_gap_notional > 0 and buy_sizing_budget < total_buy_gap_notional:
+                    budget_ratio = buy_sizing_budget / total_buy_gap_notional
+                    notional = desired_notional * budget_ratio
                 else:
-                    notional = abs(float(drift)) * float(equity)
+                    notional = desired_notional
                 if notional <= 0:
                     continue
 
@@ -2033,7 +2042,7 @@ class V5Pipeline:
                     getattr(self.cfg.execution, "negative_expectancy_open_block_min_closed_cycles", 2) or 2
                 )
                 floor_bps = float(
-                    getattr(self.cfg.execution, "negative_expectancy_open_block_floor_bps", 5.0) or 5.0
+                    _coalesce(getattr(self.cfg.execution, "negative_expectancy_open_block_floor_bps", 5.0), 5.0)
                 )
                 closed_cycles = int((neg_stats or {}).get("closed_cycles") or 0)
                 expectancy_bps = float((neg_stats or {}).get("expectancy_bps") or 0.0)
@@ -2168,8 +2177,12 @@ class V5Pipeline:
                     held_qty = float(getattr(held, "qty", 0.0) or 0.0)
                     held_value = held_qty * float(px)
                     premium = (float(px) / entry_px - 1.0) if entry_px > 0 else 0.0
-                    max_premium = float(getattr(self.cfg.execution, "anti_chase_max_entry_premium_pct", 0.015) or 0.015)
-                    max_add_ratio = float(getattr(self.cfg.execution, "anti_chase_max_add_notional_ratio", 0.25) or 0.25)
+                    max_premium = float(
+                        _coalesce(getattr(self.cfg.execution, "anti_chase_max_entry_premium_pct", 0.015), 0.015)
+                    )
+                    max_add_ratio = float(
+                        _coalesce(getattr(self.cfg.execution, "anti_chase_max_add_notional_ratio", 0.25), 0.25)
+                    )
 
                     if entry_px > 0 and premium > max_premium:
                         if audit:

@@ -667,3 +667,63 @@ def test_pipeline_ml_impact_uses_attribution_scores_in_shadow_mode(tmp_path, mon
     assert audit.top_scores[0]["symbol"] == "AAA/USDT"
     assert audit.ml_signal_overview["overlay_mode"] == "shadow"
     assert audit.ml_signal_overview["top_promoted"][0]["symbol"] == "BBB/USDT"
+
+
+def test_pipeline_buy_sizing_respects_target_gap_when_target_gross_is_below_one():
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    cfg = AppConfig(symbols=["AAA/USDT", "BBB/USDT"])
+    pipe = V5Pipeline(cfg, clock=FixedClock(t0))
+
+    md = {
+        "AAA/USDT": MarketSeries(
+            symbol="AAA/USDT",
+            timeframe="1h",
+            ts=[0, 1],
+            open=[1.0, 1.0],
+            high=[1.0, 1.0],
+            low=[1.0, 1.0],
+            close=[1.0, 1.0],
+            volume=[1.0, 1.0],
+        ),
+        "BBB/USDT": MarketSeries(
+            symbol="BBB/USDT",
+            timeframe="1h",
+            ts=[0, 1],
+            open=[1.0, 1.0],
+            high=[1.0, 1.0],
+            low=[1.0, 1.0],
+            close=[1.0, 1.0],
+            volume=[1.0, 1.0],
+        ),
+    }
+
+    pipe.portfolio_engine.allocate = lambda **kwargs: PortfolioSnapshot(
+        target_weights={"AAA/USDT": 0.25, "BBB/USDT": 0.25},
+        selected=["AAA/USDT", "BBB/USDT"],
+        volatilities={},
+        entry_candidates=["AAA/USDT", "BBB/USDT"],
+    )
+
+    out = pipe.run(
+        md,
+        positions=[],
+        cash_usdt=100.0,
+        equity_peak_usdt=100.0,
+        precomputed_alpha=AlphaSnapshot(
+            raw_factors={},
+            z_factors={},
+            scores={"AAA/USDT": 1.0, "BBB/USDT": 0.9},
+        ),
+        precomputed_regime=RegimeResult(
+            state=RegimeState.SIDEWAYS,
+            atr_pct=0.0,
+            ma20=0.0,
+            ma60=0.0,
+            multiplier=1.0,
+        ),
+    )
+
+    buys = sorted((order.symbol, float(order.notional_usdt)) for order in out.orders if order.side == "buy")
+
+    assert buys == [("AAA/USDT", 25.0), ("BBB/USDT", 25.0)]
+    assert sum(notional for _, notional in buys) == 50.0

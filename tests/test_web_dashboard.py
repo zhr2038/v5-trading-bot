@@ -1004,6 +1004,113 @@ def test_account_api_sanitizes_corrupted_low_peak(monkeypatch, tmp_path):
     assert payload["drawdown_pct"] == 0.0
 
 
+def test_account_api_ignores_ambient_live_creds_by_default(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "get_db_connection", lambda: None)
+    monkeypatch.setattr(module, "load_config", lambda: {})
+    monkeypatch.setattr(module, "api_positions", lambda: module.jsonify({"positions": []}))
+    monkeypatch.delenv("V5_DASHBOARD_ALLOW_LIVE_OKX_ACCOUNT", raising=False)
+    monkeypatch.delenv("V5_DASHBOARD_ALLOW_LIVE_OKX", raising=False)
+    monkeypatch.setenv("EXCHANGE_API_KEY", "ambient-key")
+    monkeypatch.setenv("EXCHANGE_API_SECRET", "ambient-secret")
+    monkeypatch.setenv("EXCHANGE_PASSPHRASE", "ambient-passphrase")
+
+    def _unexpected_request(*args, **kwargs):
+        raise AssertionError("api/account should not call live OKX without explicit enable flag")
+
+    monkeypatch.setattr("requests.get", _unexpected_request)
+
+    (tmp_path / "reconcile_status.json").write_text(
+        """
+        {
+          "exchange_snapshot": {
+            "ccy_cashBal": {
+              "USDT": 11.48
+            }
+          }
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/account")
+
+    assert response.status_code == 200
+    assert response.get_json()["cash_usdt"] == 11.48
+
+
+def test_trades_api_ignores_ambient_live_creds_by_default(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "get_db_connection", lambda: None)
+    monkeypatch.delenv("V5_DASHBOARD_ALLOW_LIVE_OKX_ACCOUNT", raising=False)
+    monkeypatch.delenv("V5_DASHBOARD_ALLOW_LIVE_OKX", raising=False)
+    monkeypatch.setenv("EXCHANGE_API_KEY", "ambient-key")
+    monkeypatch.setenv("EXCHANGE_API_SECRET", "ambient-secret")
+    monkeypatch.setenv("EXCHANGE_PASSPHRASE", "ambient-passphrase")
+
+    def _unexpected_request(*args, **kwargs):
+        raise AssertionError("api/trades should not call live OKX without explicit enable flag")
+
+    monkeypatch.setattr("requests.get", _unexpected_request)
+
+    response = client.get("/api/trades")
+
+    assert response.status_code == 200
+    assert response.get_json()["trades"] == []
+
+
+def test_positions_api_ignores_ambient_live_creds_by_default(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.delenv("V5_DASHBOARD_ALLOW_LIVE_OKX_ACCOUNT", raising=False)
+    monkeypatch.delenv("V5_DASHBOARD_ALLOW_LIVE_OKX", raising=False)
+    monkeypatch.setenv("EXCHANGE_API_KEY", "ambient-key")
+    monkeypatch.setenv("EXCHANGE_API_SECRET", "ambient-secret")
+    monkeypatch.setenv("EXCHANGE_PASSPHRASE", "ambient-passphrase")
+
+    def _unexpected_request(*args, **kwargs):
+        raise AssertionError("api/positions should not call live OKX without explicit enable flag")
+
+    monkeypatch.setattr("requests.get", _unexpected_request)
+
+    response = client.get("/api/positions")
+
+    assert response.status_code == 200
+    assert response.get_json()["positions"] == []
+
+
+def test_health_api_ignores_ambient_live_creds_by_default(monkeypatch, tmp_path):
+    module = load_web_dashboard_module()
+    client = module.app.test_client()
+    monkeypatch.setattr(module, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(module, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(module, "SYSTEMCTL_BIN", None)
+    monkeypatch.delenv("V5_DASHBOARD_ALLOW_LIVE_OKX_ACCOUNT", raising=False)
+    monkeypatch.delenv("V5_DASHBOARD_ALLOW_LIVE_OKX", raising=False)
+    monkeypatch.setenv("EXCHANGE_API_KEY", "ambient-key")
+    monkeypatch.setenv("EXCHANGE_API_SECRET", "ambient-secret")
+    monkeypatch.setenv("EXCHANGE_PASSPHRASE", "ambient-passphrase")
+
+    def _unexpected_request(*args, **kwargs):
+        raise AssertionError("api/health should not call live OKX without explicit enable flag")
+
+    monkeypatch.setattr("requests.get", _unexpected_request)
+
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert any(check.get("name") == "OKX API" and check.get("status") == "warning" for check in payload["checks"])
+
+
 def test_auto_risk_guard_api_uses_auto_risk_eval_file(monkeypatch, tmp_path):
     module = load_web_dashboard_module()
     client = module.app.test_client()

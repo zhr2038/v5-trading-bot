@@ -73,11 +73,32 @@ def _source_confidence_for(ts_ms: int, snapshots: List[RssCacheSnapshot]) -> flo
     return snapshots[idx].source_confidence
 
 
+def _resolve_cutoff_ms(cur: sqlite3.Cursor, snapshots: List[RssCacheSnapshot], hours: int) -> int:
+    if hours <= 0:
+        return 0
+
+    reference_ts_ms: List[int] = []
+
+    cur.execute("SELECT MAX(ts_ms) FROM regime_history WHERE rss_sentiment IS NOT NULL")
+    row = cur.fetchone()
+    if row and row[0] is not None:
+        reference_ts_ms.append(int(row[0]))
+
+    if snapshots:
+        reference_ts_ms.append(int(max(item.collected_at for item in snapshots).timestamp() * 1000))
+
+    if not reference_ts_ms:
+        return 0
+
+    window_ms = int(timedelta(hours=hours).total_seconds() * 1000)
+    return max(0, max(reference_ts_ms) - window_ms)
+
+
 def backfill_regime_history_rss(db_path: Path, cache_dir: Path, hours: int) -> dict:
     snapshots = _load_rss_cache_snapshots(cache_dir)
-    cutoff_ms = int((datetime.now() - timedelta(hours=hours)).timestamp() * 1000)
     conn = sqlite3.connect(str(db_path))
     cur = conn.cursor()
+    cutoff_ms = _resolve_cutoff_ms(cur, snapshots, hours)
     cur.execute(
         """
         SELECT id, ts_ms, rss_sentiment, rss_state, rss_confidence

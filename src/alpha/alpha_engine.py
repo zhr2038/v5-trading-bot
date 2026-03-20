@@ -45,6 +45,10 @@ def _rsi(closes: List[float], period: int = 14) -> float:
     return float(100.0 - 100.0 / (1.0 + rs))
 
 
+def _coalesce(value: Any, default: Any) -> Any:
+    return default if value is None else value
+
+
 @dataclass
 class AlphaSnapshot:
     """Alpha因子快照
@@ -176,9 +180,9 @@ class AlphaEngine:
 
         regime_key = self._normalize_regime_key(self.current_regime_key) or "Sideways"
         multiplier_map = {
-            "Trending": float(getattr(mean_cfg, "allocation_multiplier_trending", 0.70) or 0.70),
-            "Sideways": float(getattr(mean_cfg, "allocation_multiplier_sideways", 1.20) or 1.20),
-            "Risk-Off": float(getattr(mean_cfg, "allocation_multiplier_risk_off", 0.90) or 0.90),
+            "Trending": float(_coalesce(getattr(mean_cfg, "allocation_multiplier_trending", None), 0.70)),
+            "Sideways": float(_coalesce(getattr(mean_cfg, "allocation_multiplier_sideways", None), 1.20)),
+            "Risk-Off": float(_coalesce(getattr(mean_cfg, "allocation_multiplier_risk_off", None), 0.90)),
         }
         mean_multiplier = multiplier_map.get(regime_key, 1.0)
 
@@ -221,7 +225,7 @@ class AlphaEngine:
             if not isinstance(factor_ic, dict):
                 return dict(default_weights)
 
-            min_abs_ic = float(getattr(ic_cfg, 'min_abs_ic', 0.003) or 0.003)
+            min_abs_ic = float(_coalesce(getattr(ic_cfg, 'min_abs_ic', None), 0.003))
             dyn: Dict[str, float] = {}
             has_any = False
             for k in (default_weights or {}).keys():
@@ -367,10 +371,10 @@ class AlphaEngine:
                 getattr(self.cfg, "multi_strategy_conflict_dominance_ratio", 1.35) or 1.35
             ),
             conflict_min_confidence=float(
-                getattr(self.cfg, "multi_strategy_conflict_min_confidence", 0.60) or 0.60
+                _coalesce(getattr(self.cfg, "multi_strategy_conflict_min_confidence", None), 0.60)
             ),
             conflict_penalty_strength=float(
-                getattr(self.cfg, "multi_strategy_conflict_penalty_strength", 0.65) or 0.65
+                _coalesce(getattr(self.cfg, "multi_strategy_conflict_penalty_strength", None), 0.65)
             ),
         )
         print(f"[AlphaEngine] 多策略资金基数: {float(total_capital):.4f} USDT (dynamic)")
@@ -386,20 +390,20 @@ class AlphaEngine:
         orchestrator.register_strategy(trend_strategy, allocation=Decimal('0.20'))
 
         mean_cfg = getattr(self.cfg, "mean_reversion", None)
-        mean_base_allocation = float(getattr(mean_cfg, "allocation", 0.25) or 0.25) if mean_cfg is not None else 0.25
+        mean_base_allocation = float(_coalesce(getattr(mean_cfg, "allocation", None), 0.25)) if mean_cfg is not None else 0.25
 
         # 注册均值回归策略
         mean_revert_strategy = MeanReversionStrategy(config={
-            'rsi_period': int(getattr(mean_cfg, 'rsi_period', 14) or 14),
-            'rsi_oversold': float(getattr(mean_cfg, 'rsi_oversold', 28) or 28),
-            'rsi_overbought': float(getattr(mean_cfg, 'rsi_overbought', 72) or 72),
-            'bb_period': int(getattr(mean_cfg, 'bb_period', 20) or 20),
-            'bb_std': float(getattr(mean_cfg, 'bb_std', 2.0) or 2.0),
-            'position_size_pct': float(getattr(mean_cfg, 'position_size_pct', mean_base_allocation) or mean_base_allocation),
-            'mean_rev_threshold': float(getattr(mean_cfg, 'mean_rev_threshold', 0.025) or 0.025),
-            'volume_dry_ratio': float(getattr(mean_cfg, 'volume_dry_ratio', 0.8) or 0.8),
-            'buy_score_multiplier': float(getattr(mean_cfg, 'buy_score_multiplier', 0.75) or 0.75),
-            'sell_score_multiplier': float(getattr(mean_cfg, 'sell_score_multiplier', 1.0) or 1.0),
+            'rsi_period': int(_coalesce(getattr(mean_cfg, 'rsi_period', None), 14)),
+            'rsi_oversold': float(_coalesce(getattr(mean_cfg, 'rsi_oversold', None), 28)),
+            'rsi_overbought': float(_coalesce(getattr(mean_cfg, 'rsi_overbought', None), 72)),
+            'bb_period': int(_coalesce(getattr(mean_cfg, 'bb_period', None), 20)),
+            'bb_std': float(_coalesce(getattr(mean_cfg, 'bb_std', None), 2.0)),
+            'position_size_pct': float(_coalesce(getattr(mean_cfg, 'position_size_pct', None), mean_base_allocation)),
+            'mean_rev_threshold': float(_coalesce(getattr(mean_cfg, 'mean_rev_threshold', None), 0.025)),
+            'volume_dry_ratio': float(_coalesce(getattr(mean_cfg, 'volume_dry_ratio', None), 0.8)),
+            'buy_score_multiplier': float(_coalesce(getattr(mean_cfg, 'buy_score_multiplier', None), 0.75)),
+            'sell_score_multiplier': float(_coalesce(getattr(mean_cfg, 'sell_score_multiplier', None), 1.0)),
         })
         self.mean_reversion_strategy = mean_revert_strategy
         orchestrator.register_strategy(mean_revert_strategy, allocation=Decimal(str(mean_base_allocation)))
@@ -441,11 +445,11 @@ class AlphaEngine:
             'score_transform': str(getattr(self.cfg, 'multi_strategy_score_transform', 'tanh') or 'tanh'),
             'score_transform_scale': float(getattr(self.cfg, 'multi_strategy_score_transform_scale', 1.0) or 1.0),
             'alpha158_enabled': bool(getattr(getattr(self.cfg, 'alpha158_overlay', None), 'enabled', False)),
-            'alpha158_blend_weight': float(getattr(getattr(self.cfg, 'alpha158_overlay', None), 'blend_weight', 0.35) or 0.35),
+            'alpha158_blend_weight': float(_coalesce(getattr(getattr(self.cfg, 'alpha158_overlay', None), 'blend_weight', None), 0.35)),
             'dynamic_ic_weighting': {
                 'enabled': bool(getattr(getattr(self.cfg, 'dynamic_ic_weighting', None), 'enabled', False)),
                 'ic_monitor_path': str(getattr(getattr(self.cfg, 'dynamic_ic_weighting', None), 'ic_monitor_path', 'reports/alpha_ic_monitor.json')),
-                'min_abs_ic': float(getattr(getattr(self.cfg, 'dynamic_ic_weighting', None), 'min_abs_ic', 0.003) or 0.003),
+                'min_abs_ic': float(_coalesce(getattr(getattr(self.cfg, 'dynamic_ic_weighting', None), 'min_abs_ic', None), 0.003)),
                 'fallback_to_static': bool(getattr(getattr(self.cfg, 'dynamic_ic_weighting', None), 'fallback_to_static', True)),
             },
         })
@@ -1276,7 +1280,7 @@ class AlphaEngine:
 
         ov_cfg = getattr(self.cfg, "alpha158_overlay", None)
         ov_enabled = bool(getattr(ov_cfg, "enabled", False))
-        ov_blend = float(getattr(ov_cfg, "blend_weight", 0.35) or 0.35)
+        ov_blend = float(_coalesce(getattr(ov_cfg, "blend_weight", None), 0.35))
 
         static_ov_w: Dict[str, float] = {}
         if ov_enabled and ov_cfg is not None and getattr(ov_cfg, "weights", None) is not None:
